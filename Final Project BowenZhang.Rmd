@@ -1,0 +1,198 @@
+---
+title: "STAT 184 Project"
+author: "Bowen Zhang"
+date: "12.8.2019"
+output:  html_notebook
+---
+###set up packages
+```{r}
+rm(list = ls())
+library(choroplethr)
+library(MASS)
+library(nortest)
+library(tidyverse) 
+library(mosaicData) 
+library(mosaic)    
+library(DataComputing)
+library(rvest)
+library(lubridate)
+library(maps) 
+library(zipcode) 
+```
+
+###input data
+```{r}
+autos <- read_csv("/Users/Dora/Desktop/used-cars-database/autos.csv")
+gdp <- read_csv("/Users/Dora/Desktop/download.csv")
+state <- read_csv("/Users/Dora/Desktop/data.csv")
+head(state)
+head(gdp, n = 50)
+head(autos, n = 100)
+data("zipcode")
+head(zipcode)
+```
+###Backgroud Index:
+
+With the development of our modern society, cars become an important part both in commercial activities and our life. At the same time, the second hand cars commercial became more and more rapid in our life. There are a lot of people prefer an second hand car rather than a brand new one, so the factors that may exert an influence on the price of an used car need us to pay attention on it. In this project, we are going to discover the factors that may influence the overall prices of an used car.
+
+###Main purples:
+During this research, we pay attention on private cars rather than commercial purpose cars.
+
+Q1:Which variables will influence the price of second hand cars?
+
+Q2:Which part in US has the highest frequency of second hand cars commercial, does it has any relationship with the GDP of a state?
+
+###Question #1: Which variables will influence the price of second hand cars?
+
+```{r}
+###Set up data
+head(autos, n = 50)
+car <- 
+  autos %>%
+  select(price, yearOfRegistration, vehicleType, powerPS, gearbox, kilometer, brand, notRepairedDamage) %>%
+  filter(!grepl("(bus|andere)", vehicleType))
+
+#define function for mileage
+sep = function(kilometer){
+  sapply(kilometer, function(x) 
+    if (x < 30000) "Bt 0 ~ 30000"
+    else if (x >= 30000 && x < 60000) "Bt 30000 ~ 60000" 
+    else if (x >= 60000 && x < 90000) "Bt 60000 ~ 90000" 
+    else if (x >= 90000 && x < 120000) "Bt 90000 ~ 120000" 
+    else if (x >= 120000 && x < 150000) "Bt 120000 ~ 150000"
+    else "Larger than 150000" )
+}
+#define function for price
+pri = function(price){
+  sapply(price, function(x)
+    if (x < 100) "Error"
+    else if (x >= 999999 ) "Error"
+    else "Normal" )
+}
+#define function for powerPS
+pw = function(powerPS){
+  sapply(powerPS, function(x)
+    if (x < 100) "0 - 100"
+    else if (x <= 200 && x >= 100 ) "100 - 200"
+    else if (x <= 300 && x >= 200 ) "200 - 300"
+    else if (x <= 400 && x >= 300 ) "300 - 400"
+    else if (x <= 500 && x >= 400 ) "400 - 500"
+    else "Larger than 500" )
+}
+```
+
+
+```{r}
+##The price vs. mileage, power & car types
+car %>%
+  mutate(prirange = pri(price)) %>%
+  mutate(PWrange = pw(powerPS)) %>%
+  select(price, vehicleType, kilometer, PWrange) %>%
+  group_by(vehicleType, PWrange, kilometer) %>%
+  summarise(avePrice = mean(price)) %>%
+  na.omit() %>%
+  ggplot(aes(x = kilometer, y = avePrice, group = PWrange))+ 
+  geom_line(aes(color = PWrange)) + 
+  facet_wrap(~vehicleType)+
+  ylim(0, 80000)
+```
+
+With the increase on mileage, the price goes down significantly for car types except kleinwagen. Becides, with the increase of horsepower of cars, the price goes up excepy kleinwagen.
+
+```{r}
+##The price vs. years & damage
+car
+car %>%
+  mutate(prirange = pri(price)) %>%
+  mutate(rank = sep(kilometer)) %>%
+  select(price, yearOfRegistration, rank, notRepairedDamage) %>%
+  group_by(yearOfRegistration, notRepairedDamage) %>%
+  summarise(avePrice = mean(price)) %>%
+  na.omit() %>%
+  ggplot(aes(x = yearOfRegistration, y = avePrice, group = notRepairedDamage))+
+  stat_smooth()+
+  geom_point(aes(color = notRepairedDamage)) + 
+  xlim(1950,2019)+
+  ylim(0,15000)
+```
+The price got the lowest point aroud 90s, which could explain by the fact that the price of vintage cars will goes up with time passed by. For a car has not repaired damege(color red), the price is lower than the car with no damage, and the years' influence on damaged cars is not very significant.
+
+```{r}
+##The price vs. gearbox & car types
+
+pricerange <-
+  car %>%
+  mutate(prirange = pri(price)) %>%
+  filter(!grepl("Error", prirange)) %>%       ###get rid of the error price
+  mutate(rank = sep(kilometer))               ###Set up the mileage range
+pricerange
+
+finalform <- 
+  pricerange %>%
+  group_by(brand, rank, vehicleType, gearbox) %>% 
+  summarise(minPrice = min(price, na.rm = TRUE), 
+         avePrice = mean(price, na.rm = TRUE),
+         maxPrice = max(price, na.rm = TRUE),
+         sdPrice = sd(price)) %>%
+  na.omit()
+
+
+gear <- 
+  finalform %>%
+  spread(key = gearbox, value = avePrice) %>%
+  select(brand, rank, automatik, manuell, vehicleType)
+gear[is.na(gear)] <- 0 
+gear
+gear %>%
+  group_by(brand, vehicleType) %>%
+  summarise(automatic = sum(automatik), manuell = sum(manuell)) %>%
+  gather(key = gearbox, value = price, automatic, manuell) %>%
+  filter(!grepl("0", price)) %>%
+  ggplot(aes(x = gearbox, y = price))+
+  geom_boxplot(aes(group = gearbox, fill = gearbox))+
+  facet_wrap( ~ vehicleType)+
+  geom_point(aes(color = brand, y = price))+
+  ylim(0, 150000)
+ 
+```
+The price range of automatic cars is larger than the manuell ones. Price range of manuell cars is larger on some sport car types compared with the families car types.
+
+
+###Question #2: Which part in US has the highest frequency of second hand cars commercial.
+```{r}
+region <-
+  autos %>%
+  select(name, price, vehicleType, kilometer, postalCode) %>%
+  group_by(postalCode) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count))
+CarData <-
+  region %>%
+  inner_join(zipcode %>% select("zip","state"), by = c("postalCode" = "zip")) %>%
+  group_by(state) %>%
+  summarise(n = sum(count)) %>%
+  arrange(desc(n))
+head(CarData, n = 10)
+CarData %>%
+  USMap(key = "state", fill = "n") 
+```
+
+```{r}
+##The relationship between the frequency and the states' GDP
+newgdp <-
+  gdp %>%
+  select(GeoName,gdp) %>%
+  filter(GeoName != "United States*") %>%
+  inner_join(state %>% select("State","Code"), by = c("GeoName" = "State")) %>%
+  arrange(desc(gdp)) 
+newgdp %>%  
+  USMap(key = "GeoName", fill = "gdp") 
+newgdp
+
+CargdpData <-
+  CarData %>%
+  inner_join(newgdp, by = c("state" = "Code")) 
+CargdpData
+
+```
+
